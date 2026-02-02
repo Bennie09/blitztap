@@ -6,10 +6,15 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../providers/game_provider.dart';
 import '../utils/app_colors.dart';
 import '../models/time_preset.dart';
+import '../models/match_history.dart';
+import '../services/history_service.dart';
 import '../widgets/countdown_overlay.dart';
+import 'history_detail_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
-  const SettingsScreen({super.key});
+  final MatchHistory? rematchMatch;
+
+  const SettingsScreen({super.key, this.rematchMatch});
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -26,9 +31,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final TextEditingController player2Controller = TextEditingController();
   final TextEditingController customNameController = TextEditingController();
   List<TimePreset> savedCustomPresets = [];
+  List<MatchHistory> recentMatches = [];
   bool showCountdown = false;
   bool showPlayerNameOverlay = false;
   bool showCustomTimeSetter = false;
+  bool _rematchApplied = false;
 
   static const List<TimePresetCategory> presetCategories = [
     TimePresetCategory(
@@ -62,9 +69,59 @@ class _SettingsScreenState extends State<SettingsScreen> {
     super.initState();
     // Restore normal system UI when entering settings screen
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-    _loadSavedPresets();
     player1Controller.text = 'Player 1';
     player2Controller.text = 'Player 2';
+    _loadSavedPresets().then((_) {
+      if (mounted && widget.rematchMatch != null) {
+        _applyRematch(widget.rematchMatch!);
+      }
+    });
+    _loadRecentMatches();
+  }
+
+  Future<void> _loadRecentMatches() async {
+    final list = await HistoryService().getRecent(limit: 3);
+    if (mounted) setState(() => recentMatches = list);
+  }
+
+  void _applyRematch(MatchHistory match) {
+    player1Controller.text = match.player1Name;
+    player2Controller.text = match.player2Name;
+    customMinutes = match.minutes;
+    customIncrement = match.increment;
+    _rematchApplied = false;
+    selectedPreset = null;
+    // Try to find matching preset in Bullet/Blitz/Rapid categories first
+    for (final category in presetCategories) {
+      final matching = category.presets.where(
+        (p) => p.minutes == match.minutes && p.increment == match.increment,
+      );
+      if (matching.isNotEmpty) {
+        selectedCategory = category.category;
+        selectedPreset = matching.first;
+        isCustomMode = false;
+        setState(() {});
+        return;
+      }
+    }
+    // Else try saved custom presets
+    final matchingSaved = savedCustomPresets
+        .where(
+          (p) => p.minutes == match.minutes && p.increment == match.increment,
+        )
+        .toList();
+    if (matchingSaved.isNotEmpty) {
+      selectedCategory = 'Custom';
+      selectedPreset = matchingSaved.first;
+      isCustomMode = true;
+      setState(() {});
+      return;
+    }
+    // No matching preset: use custom values so user can click Start Game directly
+    selectedCategory = 'Custom';
+    isCustomMode = true;
+    _rematchApplied = true;
+    setState(() {});
   }
 
   @override
@@ -116,16 +173,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   void _onStartGamePressed() {
-    // Check if a preset is selected (either from categories or custom saved preset)
+    // Check if a preset is selected (either from categories or custom saved preset) or rematch applied
     if (!isCustomMode && selectedPreset == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please select a time control')),
       );
       return;
     }
-    // For custom mode, ensure a saved preset is selected
-    if (isCustomMode && selectedCategory == 'Custom') {
-      // Check if the current custom time matches a saved preset
+    // For custom mode, ensure a saved preset is selected or rematch was applied
+    if (isCustomMode && selectedCategory == 'Custom' && !_rematchApplied) {
       final hasMatchingPreset = savedCustomPresets.any(
         (preset) =>
             preset.minutes == customMinutes &&
@@ -223,7 +279,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 32),
+                  const SizedBox(height: 24),
+
+                  // Recent Matches & History
+                  _buildRecentMatchesSection(),
+                  const SizedBox(height: 24),
 
                   // Time Selection Card
                   Container(
@@ -329,6 +389,86 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
+  Widget _buildRecentMatchesSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Text(
+              'Recent Matches',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w600,
+                color: AppColors.textPrimary,
+              ),
+            ),
+            TextButton.icon(
+              onPressed: () async {
+                await Navigator.of(context).pushNamed('/history');
+                _loadRecentMatches();
+              },
+              icon: const Icon(
+                Icons.history,
+                size: 18,
+                color: AppColors.active,
+              ),
+              label: const Text(
+                'View all',
+                style: TextStyle(color: AppColors.active),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        if (recentMatches.isEmpty)
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Center(
+              child: Text(
+                'No recent matches',
+                style: TextStyle(
+                  fontSize: 14,
+                  color: AppColors.textSecondary.withOpacity(0.8),
+                ),
+              ),
+            ),
+          )
+        else
+          ...recentMatches.map(
+            (match) => Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: _RecentMatchTile(
+                match: match,
+                onRematch: () => _applyRematch(match),
+                onTap: () async {
+                  await Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (context) => HistoryDetailScreen(
+                        match: match,
+                        onDeleted: _loadRecentMatches,
+                        onFavouriteToggled: _loadRecentMatches,
+                        onRematch: (m) {
+                          Navigator.of(context).pop();
+                          _applyRematch(m);
+                        },
+                      ),
+                    ),
+                  );
+                  _loadRecentMatches();
+                },
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
   Widget _buildCategorySection(
     String categoryName,
     String iconPath,
@@ -378,6 +518,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       selectedCategory = categoryName;
                       selectedPreset = preset;
                       isCustomMode = false;
+                      _rematchApplied = false;
                     });
                   },
                   style: ElevatedButton.styleFrom(
@@ -473,6 +614,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           customIncrement = preset.increment;
                           isCustomMode = true;
                           selectedPreset = null;
+                          _rematchApplied = false;
                         });
                       },
                       style: ElevatedButton.styleFrom(
@@ -981,6 +1123,80 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ],
               ),
             ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _RecentMatchTile extends StatelessWidget {
+  final MatchHistory match;
+  final VoidCallback onRematch;
+  final VoidCallback onTap;
+
+  const _RecentMatchTile({
+    required this.match,
+    required this.onRematch,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: AppColors.surface,
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      '${match.player1Name} vs ${match.player2Name}',
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.textPrimary,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      match.resultSummary,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: AppColors.textSecondary,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+              TextButton.icon(
+                onPressed: () {
+                  HapticFeedback.lightImpact();
+                  onRematch();
+                },
+                icon: const Icon(
+                  Icons.replay,
+                  size: 16,
+                  color: AppColors.active,
+                ),
+                label: const Text(
+                  'Rematch',
+                  style: TextStyle(fontSize: 12, color: AppColors.active),
+                ),
+              ),
+            ],
           ),
         ),
       ),

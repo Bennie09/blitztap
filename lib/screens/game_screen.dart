@@ -9,6 +9,8 @@ import '../widgets/swap_button.dart';
 import '../widgets/end_game_overlay.dart';
 import '../widgets/pause_overlay.dart';
 import '../widgets/confirmation_overlay.dart';
+import '../models/match_history.dart';
+import '../services/history_service.dart';
 
 class GameScreen extends StatefulWidget {
   const GameScreen({super.key});
@@ -20,6 +22,7 @@ class GameScreen extends StatefulWidget {
 class _GameScreenState extends State<GameScreen> {
   ConfirmationType? _activeConfirmation;
   int? _confirmationPlayerNumber;
+  bool _saveScheduled = false;
 
   @override
   void initState() {
@@ -30,8 +33,10 @@ class _GameScreenState extends State<GameScreen> {
 
   @override
   void dispose() {
-    // Restore system UI when leaving game screen
-    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    SystemChrome.setEnabledSystemUIMode(
+      SystemUiMode.manual,
+      overlays: [SystemUiOverlay.top, SystemUiOverlay.bottom],
+    );
     super.dispose();
   }
 
@@ -62,14 +67,42 @@ class _GameScreenState extends State<GameScreen> {
   Widget build(BuildContext context) {
     return Consumer<GameProvider>(
       builder: (context, gameProvider, child) {
-        final player1 = gameProvider.swapped ? gameProvider.player2 : gameProvider.player1;
-        final player2 = gameProvider.swapped ? gameProvider.player1 : gameProvider.player2;
-        final isGameEnded = gameProvider.gameStatus == GameStatus.checkmate ||
+        final player1 = gameProvider.swapped
+            ? gameProvider.player2
+            : gameProvider.player1;
+        final player2 = gameProvider.swapped
+            ? gameProvider.player1
+            : gameProvider.player2;
+        final isGameEnded =
+            gameProvider.gameStatus == GameStatus.checkmate ||
             gameProvider.gameStatus == GameStatus.stalemate ||
             gameProvider.gameStatus == GameStatus.forfeit ||
             gameProvider.gameStatus == GameStatus.timeout;
         final isPaused = gameProvider.gameStatus == GameStatus.paused;
-        final showConfirmation = _activeConfirmation != null && _confirmationPlayerNumber != null;
+        final showConfirmation =
+            _activeConfirmation != null && _confirmationPlayerNumber != null;
+
+        // Save match in background when game ends (once), without blocking UI
+        if (isGameEnded && !_saveScheduled) {
+          WidgetsBinding.instance.addPostFrameCallback((_) async {
+            if (!mounted || _saveScheduled) return;
+            _saveScheduled = true;
+            setState(() {});
+            final gp = gameProvider;
+            final match = MatchHistory(
+              id: '${DateTime.now().millisecondsSinceEpoch}_${gp.totalMoveCount}',
+              player1Name: gp.player1.name,
+              player2Name: gp.player2.name,
+              minutes: gp.initialMinutes,
+              increment: gp.incrementSeconds,
+              winner: gp.winner,
+              endCondition: gp.endCondition ?? '',
+              moveCount: gp.totalMoveCount,
+              playedAt: DateTime.now(),
+            );
+            await HistoryService().addMatch(match);
+          });
+        }
 
         return Scaffold(
           backgroundColor: AppColors.background,
@@ -88,27 +121,35 @@ class _GameScreenState extends State<GameScreen> {
                             Expanded(
                               child: Transform(
                                 alignment: Alignment.center,
-                                transform: Matrix4.rotationZ(3.14159), // 180 degrees
+                                transform: Matrix4.rotationZ(
+                                  3.14159,
+                                ), // 180 degrees
                                 child: PlayerHalf(
                                   player: player2,
                                   isSwapped: gameProvider.swapped,
                                   isInverted: true,
                                   onCheckmateRequested: () {
                                     setState(() {
-                                      _activeConfirmation = ConfirmationType.checkmate;
-                                      _confirmationPlayerNumber = player2.playerNumber;
+                                      _activeConfirmation =
+                                          ConfirmationType.checkmate;
+                                      _confirmationPlayerNumber =
+                                          player2.playerNumber;
                                     });
                                   },
                                   onStalemateRequested: () {
                                     setState(() {
-                                      _activeConfirmation = ConfirmationType.stalemate;
-                                      _confirmationPlayerNumber = player2.playerNumber;
+                                      _activeConfirmation =
+                                          ConfirmationType.stalemate;
+                                      _confirmationPlayerNumber =
+                                          player2.playerNumber;
                                     });
                                   },
                                   onForfeitRequested: () {
                                     setState(() {
-                                      _activeConfirmation = ConfirmationType.forfeit;
-                                      _confirmationPlayerNumber = player2.playerNumber;
+                                      _activeConfirmation =
+                                          ConfirmationType.forfeit;
+                                      _confirmationPlayerNumber =
+                                          player2.playerNumber;
                                     });
                                   },
                                 ),
@@ -123,37 +164,77 @@ class _GameScreenState extends State<GameScreen> {
                                 onCheckmateRequested: () {
                                   gameProvider.pauseForConfirmation();
                                   setState(() {
-                                    _activeConfirmation = ConfirmationType.checkmate;
-                                    _confirmationPlayerNumber = player1.playerNumber;
+                                    _activeConfirmation =
+                                        ConfirmationType.checkmate;
+                                    _confirmationPlayerNumber =
+                                        player1.playerNumber;
                                   });
                                 },
                                 onStalemateRequested: () {
                                   gameProvider.pauseForConfirmation();
                                   setState(() {
-                                    _activeConfirmation = ConfirmationType.stalemate;
-                                    _confirmationPlayerNumber = player1.playerNumber;
+                                    _activeConfirmation =
+                                        ConfirmationType.stalemate;
+                                    _confirmationPlayerNumber =
+                                        player1.playerNumber;
                                   });
                                 },
                                 onForfeitRequested: () {
                                   gameProvider.pauseForConfirmation();
                                   setState(() {
-                                    _activeConfirmation = ConfirmationType.forfeit;
-                                    _confirmationPlayerNumber = player1.playerNumber;
+                                    _activeConfirmation =
+                                        ConfirmationType.forfeit;
+                                    _confirmationPlayerNumber =
+                                        player1.playerNumber;
                                   });
                                 },
                               ),
                             ),
                           ],
                         ),
-                        // Overlay swap button in the middle
+                        // Overlay: swap button centered (48px tall → center at half - 24)
                         Positioned(
                           left: 0,
                           right: 0,
-                          top: constraints.maxHeight / 2 - 24,
-                          child: Center(
-                            child: SwapButton(),
+                          // Adjust 'top' to account for the extra margin you're adding
+                          // If margin is 16, subtract 16 from the original top to keep the button centered
+                          top: (constraints.maxHeight / 2 - 24) - 16,
+                          height:
+                              48 +
+                              32, // Original height (48) + top/bottom margin (16 + 16)
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              vertical: 16,
+                            ), // This creates the "push"
+                            child: Center(child: SwapButton()),
                           ),
                         ),
+                        // Move counter: bottom-left for player 1 (down half)
+                        if (gameProvider.gameStatus == GameStatus.ongoing ||
+                            gameProvider.gameStatus == GameStatus.paused)
+                          Positioned(
+                            left: 16,
+                            bottom: 16,
+                            child: _MoveCounterBadge(
+                              count: gameProvider.player1Moves,
+                            ),
+                          ),
+                        // Move counter: top-right for player 2 (upper half)
+                        if (gameProvider.gameStatus == GameStatus.ongoing ||
+                            gameProvider.gameStatus == GameStatus.paused)
+                          Positioned(
+                            top: 16,
+                            right: 16,
+                            child: Transform(
+                              alignment: Alignment.center,
+                              transform: Matrix4.rotationZ(
+                                3.14159,
+                              ), // 180 degrees
+                              child: _MoveCounterBadge(
+                                count: gameProvider.player2Moves,
+                              ),
+                            ),
+                          ),
                       ],
                     ),
                   ),
@@ -171,20 +252,17 @@ class _GameScreenState extends State<GameScreen> {
                     ),
                   if (isGameEnded)
                     Positioned.fill(
-                      child: GestureDetector(
-                        behavior: HitTestBehavior.opaque,
-                        onTap: () {}, // Prevent taps from passing through
-                        child: EndGameOverlay(
-                          gameStatus: gameProvider.gameStatus,
-                          winner: gameProvider.winner,
-                          endCondition: gameProvider.endCondition,
-                          onReset: () {
-                            gameProvider.resetGame();
-                            // UI restoration is handled by dispose() and EndGameOverlay navigation
-                          },
-                        ),
+                      child: EndGameOverlay(
+                        gameStatus: gameProvider.gameStatus,
+                        winner: gameProvider.winner,
+                        endCondition: gameProvider.endCondition,
+                        moveCount: gameProvider.totalMoveCount,
+                        onReset: () async {
+                          gameProvider.resetGame();
+                        },
                       ),
                     ),
+
                   // Confirmation overlay
                   if (showConfirmation)
                     Positioned.fill(
@@ -240,6 +318,35 @@ class _GameScreenState extends State<GameScreen> {
           ),
         );
       },
+    );
+  }
+}
+
+class _MoveCounterBadge extends StatelessWidget {
+  final int count;
+
+  const _MoveCounterBadge({required this.count});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: AppColors.surface.withOpacity(0.9),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: AppColors.textSecondary.withOpacity(0.5),
+          width: 1,
+        ),
+      ),
+      child: Text(
+        '$count ${count == 1 ? "move" : "moves"}',
+        style: const TextStyle(
+          fontSize: 14,
+          fontWeight: FontWeight.w600,
+          color: AppColors.textPrimary,
+        ),
+      ),
     );
   }
 }

@@ -7,13 +7,15 @@ class EndGameOverlay extends StatelessWidget {
   final GameStatus gameStatus;
   final int? winner;
   final String? endCondition;
-  final VoidCallback onReset;
+  final int moveCount;
+  final Future<void> Function() onReset;
 
   const EndGameOverlay({
     super.key,
     required this.gameStatus,
     this.winner,
     this.endCondition,
+    this.moveCount = 0,
     required this.onReset,
   });
 
@@ -62,11 +64,10 @@ class EndGameOverlay extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      // ignore: deprecated_member_use
+    return Container(
+      // This ensures the background is dimmed
       color: Colors.black.withOpacity(0.7),
-      child: Align(
-        alignment: Alignment.center,
+      child: Center(
         child: TweenAnimationBuilder<double>(
           tween: Tween(begin: 0.0, end: 1.0),
           duration: const Duration(milliseconds: 400),
@@ -74,59 +75,78 @@ class EndGameOverlay extends StatelessWidget {
           builder: (context, value, child) {
             return Transform.scale(
               scale: value,
-              child: Container(
-                margin: const EdgeInsets.all(32),
-                padding: const EdgeInsets.all(32),
-                decoration: BoxDecoration(
-                  color: AppColors.surface,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: _getResultColor(), width: 2),
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(_getResultIcon(), size: 64, color: _getResultColor()),
-                    const SizedBox(height: 24),
-                    Text(
-                      _getResultText(),
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
+              child: Material(
+                // Material moved here to only wrap the dialog
+                color: Colors.transparent,
+                child: Container(
+                  width: MediaQuery.of(context).size.width * 0.8,
+                  constraints: const BoxConstraints(maxWidth: 400),
+                  padding: const EdgeInsets.all(32),
+                  decoration: BoxDecoration(
+                    color: AppColors.surface,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: _getResultColor(), width: 2),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.5),
+                        blurRadius: 20,
+                        offset: const Offset(0, 10),
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        _getResultIcon(),
+                        size: 64,
                         color: _getResultColor(),
                       ),
-                    ),
-                    const SizedBox(height: 32),
-                    ElevatedButton(
-                      onPressed: () {
-                        // Restore normal system UI before navigating
-                        SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-                        onReset();
-                        Navigator.of(context).pushNamedAndRemoveUntil(
-                          '/settings',
-                          (route) => false,
-                        );
-                      },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.active,
-                        foregroundColor: AppColors.textPrimary,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 32,
-                          vertical: 16,
-                        ),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                      ),
-                      child: const Text(
-                        'New Game',
+                      const SizedBox(height: 24),
+                      Text(
+                        _getResultText(),
+                        textAlign: TextAlign.center,
                         style: TextStyle(
-                          fontSize: 18,
+                          fontSize: 24,
                           fontWeight: FontWeight.bold,
+                          color: _getResultColor(),
                         ),
                       ),
-                    ),
-                  ],
+                      const SizedBox(height: 32),
+                      ElevatedButton(
+                        onPressed: () async {
+                          SystemChrome.setEnabledSystemUIMode(
+                            SystemUiMode.edgeToEdge,
+                          );
+                          await onReset();
+                          if (context.mounted) {
+                            Navigator.of(context).pushNamedAndRemoveUntil(
+                              '/settings',
+                              (route) => false,
+                            );
+                          }
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.active,
+                          foregroundColor: AppColors.textPrimary,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 32,
+                            vertical: 16,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                        child: const Text(
+                          'New Game',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             );

@@ -10,7 +10,7 @@ class GameProvider extends ChangeNotifier {
     playerNumber: 1,
     timeRemaining: const Duration(minutes: 5),
   );
-  
+
   Player player2 = Player(
     name: 'Player 2',
     playerNumber: 2,
@@ -20,17 +20,21 @@ class GameProvider extends ChangeNotifier {
   int currentPlayer = 1;
   GameStatus gameStatus = GameStatus.notStarted;
   Timer? timer;
-  
+
   bool pauseRequestedByPlayer1 = false;
   bool pauseRequestedByPlayer2 = false;
   bool swapped = false;
   bool confirmationActive = false; // Track if confirmation overlay is showing
-  
+
   int initialMinutes = 5;
   int incrementSeconds = 0;
-  
+
   int? winner;
   String? endCondition;
+  int player1Moves = 0;
+  int player2Moves = 0;
+
+  int get totalMoveCount => player1Moves + player2Moves;
 
   void setPlayerName(int playerNumber, String name) {
     if (playerNumber == 1) {
@@ -65,6 +69,8 @@ class GameProvider extends ChangeNotifier {
     confirmationActive = false;
     winner = null;
     endCondition = null;
+    player1Moves = 0;
+    player2Moves = 0;
     notifyListeners();
   }
 
@@ -93,7 +99,8 @@ class GameProvider extends ChangeNotifier {
           return;
         }
         player1 = player1.copyWith(
-          timeRemaining: player1.timeRemaining - const Duration(milliseconds: 100),
+          timeRemaining:
+              player1.timeRemaining - const Duration(milliseconds: 100),
         );
       } else {
         if (player2.timeRemaining.inMilliseconds <= 0) {
@@ -101,7 +108,8 @@ class GameProvider extends ChangeNotifier {
           return;
         }
         player2 = player2.copyWith(
-          timeRemaining: player2.timeRemaining - const Duration(milliseconds: 100),
+          timeRemaining:
+              player2.timeRemaining - const Duration(milliseconds: 100),
         );
       }
       notifyListeners();
@@ -116,12 +124,21 @@ class GameProvider extends ChangeNotifier {
     // Add increment to current player
     if (currentPlayer == 1) {
       player1 = player1.copyWith(
-        timeRemaining: player1.timeRemaining + Duration(seconds: incrementSeconds),
+        timeRemaining:
+            player1.timeRemaining + Duration(seconds: incrementSeconds),
       );
     } else {
       player2 = player2.copyWith(
-        timeRemaining: player2.timeRemaining + Duration(seconds: incrementSeconds),
+        timeRemaining:
+            player2.timeRemaining + Duration(seconds: incrementSeconds),
       );
+    }
+
+    // Increment move count for the player who just made the move
+    if (currentPlayer == 1) {
+      player1Moves++;
+    } else {
+      player2Moves++;
     }
 
     // Switch active player
@@ -219,10 +236,10 @@ class GameProvider extends ChangeNotifier {
     endCondition = condition;
     player1 = player1.copyWith(isActive: false);
     player2 = player2.copyWith(isActive: false);
-    
+
     // Haptic feedback
     HapticFeedback.mediumImpact();
-    
+
     notifyListeners();
   }
 

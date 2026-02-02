@@ -4,8 +4,10 @@ import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'providers/game_provider.dart';
 import 'utils/app_colors.dart';
+import 'models/match_history.dart';
 import 'screens/settings_screen.dart';
 import 'screens/game_screen.dart';
+import 'screens/history_screen.dart';
 import 'widgets/splash_screen_wrapper.dart';
 
 void main() {
@@ -41,8 +43,16 @@ class BlitzTapApp extends StatelessWidget {
         initialRoute: '/splash',
         routes: {
           '/splash': (context) => const SplashScreenWrapper(),
-          '/settings': (context) => const SettingsScreen(),
+          '/settings': (context) {
+            final args =
+                ModalRoute.of(context)?.settings.arguments
+                    as Map<String, dynamic>?;
+            return SettingsScreen(
+              rematchMatch: args?['rematch'] as MatchHistory?,
+            );
+          },
           '/game': (context) => const GameScreen(),
+          '/history': (context) => const HistoryScreen(),
         },
       ),
     );
